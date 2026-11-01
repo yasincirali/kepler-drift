@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "codebase-memory-mcp": {
+      "command": "C:\\Users\\vasin\\AppData\\Local\\Programs\\codebase-memory-mcp\\codebase-memory-mcp.exe",
+      "args": []
+    },
+    "ui-ux-pro-mcp": {
+      "command": "C:\\Users\\vasin\\AppData\\Roaming\\npm\\ui-ux-pro-mcp.cmd",
+      "args": []
+    }
+  }
+}

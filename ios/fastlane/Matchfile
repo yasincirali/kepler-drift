@@ -1,0 +1,12 @@
+# Certificate repo MATCH_GIT_URL, branch `keplerdrift`. Warning (Birdie 2026-10-19 experience): Apple allows 3 distribution
+# certificates per team; when the limit is full, `setup_match_certificates` on a separate branch tries to create a new
+# certificate and fails with "maximum number of Distribution certificates". In that case the branch is switched to the shared
+# branch that carries the certificate (Birdie/Harcliklarim: `harcliklarim`) and MATCH_PASSWORD becomes that branch's.
+git_url(ENV["MATCH_GIT_URL"])
+git_branch("keplerdrift")
+storage_mode("git")
+type("appstore")
+app_identifier(["com.keplerdrift.app"])
+username(ENV["APPLE_ID"])
+git_basic_authorization(ENV["MATCH_GIT_BASIC_AUTH"])
+readonly(ENV["MATCH_READONLY"] == "true")

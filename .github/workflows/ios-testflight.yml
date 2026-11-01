@@ -1,0 +1,199 @@
+name: iOS — TestFlight
+
+# Unity -> TestFlight on every main push (only the Unity path of Birdie Smash ios-testflight.yml; no Flutter path).
+#   1/2 ubuntu: game-ci/unity-builder generates the Xcode project (CiBuild.iOS) -> artifact (tar)
+#   2/2 macOS: fastlane `beta_unity` signs (match readonly), numbers (TestFlight latest + 1), builds, uploads.
+# Why two machines: installing the Unity Editor on a macOS runner costs ~10 min x 10 quota per build; GameCI's ready iOS
+# image runs on Linux minutes, macOS is only opened for the Xcode build + signing + upload.
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - 'store_listing/**'
+      - '**/*.md'
+  workflow_dispatch:
+
+concurrency:
+  group: ios-testflight-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Secrets gate (ubuntu, seconds): neither the Unity image nor the macOS runner starts until the Unity license and the Apple
+  # secrets are set. macOS minutes count 10x against the quota; a build bound to fail eats half of it. Secrets cannot be
+  # read directly inside `if:`, hence a separate job + output.
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      ready: ${{ steps.k.outputs.ready }}
+    steps:
+      - id: k
+        env:
+          ASC: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISS: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY: ${{ secrets.ASC_KEY_CONTENT }}
+          MATCH: ${{ secrets.MATCH_PASSWORD }}
+          MATCH_URL: ${{ secrets.MATCH_GIT_URL }}
+          U_LIC: ${{ secrets.UNITY_LICENSE }}
+          U_MAIL: ${{ secrets.UNITY_EMAIL }}
+          U_PASS: ${{ secrets.UNITY_PASSWORD }}
+        # Only presence is checked; values are never printed anywhere.
+        run: |
+          missing=""
+          [ -n "$ASC" ] && [ -n "$ASC_ISS" ] && [ -n "$ASC_KEY" ] || missing="$missing ASC_KEY_ID/ASC_ISSUER_ID/ASC_KEY_CONTENT"
+          [ -n "$MATCH" ] && [ -n "$MATCH_URL" ] || missing="$missing MATCH_PASSWORD/MATCH_GIT_URL"
+          [ -n "$U_LIC" ] && [ -n "$U_MAIL" ] && [ -n "$U_PASS" ] || missing="$missing UNITY_LICENSE/UNITY_EMAIL/UNITY_PASSWORD"
+          if [ -z "$missing" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::TestFlight skipped, missing secret:$missing"
+          fi
+
+  unity_xcode:
+    needs: gate
+    if: needs.gate.outputs.ready == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      # The iOS image is ~5.6 GB, Library + Xcode project a few GB more; the runner's free disk is tight for that.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL || true
+          df -h /
+
+      # Library = Unity's import cache; without it every build processes shaders from scratch.
+      - name: Unity Library cache
+        uses: actions/cache@v4
+        with:
+          path: unity/KeplerDrift/Library
+          key: unity-library-ios-${{ hashFiles('unity/KeplerDrift/Assets/**', 'unity/KeplerDrift/Packages/**', 'unity/KeplerDrift/ProjectSettings/**') }}
+          restore-keys: |
+            unity-library-ios-
+
+      - name: Unity iOS build (Xcode project)
+        id: unity1
+        # continue-on-error: if it fails the next step checks whether it was an IL2CPP crash; if not, the job fails there.
+        continue-on-error: true
+        uses: game-ci/unity-builder@v4.8.2
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        with:
+          unityVersion: 6000.0.58f2
+          targetPlatform: iOS
+          projectPath: unity/KeplerDrift
+          buildMethod: KeplerDrift.EditorTools.CiBuild.iOS
+          # Version name from CiBuild.Version, build number in fastlane (TestFlight latest + 1); do not look for a git tag.
+          versioning: None
+
+      # IL2CPP retry (Birdie 2026-10-29): il2cpp --convert-to-cpp occasionally dies with SIGSEGV, the same commit passes on
+      # retry. CiBuild.iOS writes build/iOS/il2cpp_crash.txt only when the log shows "il2cpp" + "Segmentation fault".
+      # Only then, and only once, is it retried; a C# compile error stays red here.
+      - name: IL2CPP crash?
+        id: crash
+        if: steps.unity1.outcome == 'failure'
+        run: |
+          if [ -f build/iOS/il2cpp_crash.txt ]; then
+            echo "::warning::IL2CPP crashed (Segmentation fault); retrying once"
+            sudo rm -rf build/iOS
+            echo "retry=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Unity iOS build failed (not an IL2CPP crash, no retry)"
+            exit 1
+          fi
+
+      - name: Unity iOS build (retry)
+        if: steps.crash.outputs.retry == 'true'
+        uses: game-ci/unity-builder@v4.8.2
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        with:
+          unityVersion: 6000.0.58f2
+          targetPlatform: iOS
+          projectPath: unity/KeplerDrift
+          buildMethod: KeplerDrift.EditorTools.CiBuild.iOS
+          versioning: None
+
+      # tar: upload-artifact drops executable bits; if the scripts in the Xcode project (process_symbols.sh, il2cpp tools)
+      # lose them the build fails on macOS.
+      - name: Pack Xcode project
+        run: |
+          test -d build/iOS/iOS/Unity-iPhone.xcodeproj || { echo "::error::Unity Xcode project was not generated (build/iOS/iOS)"; exit 1; }
+          sudo tar -C build/iOS -cf unity-ios-xcode.tar iOS
+          ls -lh unity-ios-xcode.tar
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: unity-ios-xcode
+          path: unity-ios-xcode.tar
+          retention-days: 3
+          if-no-files-found: error
+
+  unity_upload:
+    needs: [gate, unity_xcode]
+    if: needs.gate.outputs.ready == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: unity-ios-xcode
+
+      - name: Unpack Xcode project
+        run: |
+          mkdir -p "$RUNNER_TEMP/unity"
+          tar -C "$RUNNER_TEMP/unity" -xf unity-ios-xcode.tar
+          rm unity-ios-xcode.tar
+          echo "UNITY_XCODE_DIR=$RUNNER_TEMP/unity/iOS" >> "$GITHUB_ENV"
+
+      - name: Select stable Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: "^26.0"   # Birdie 2026-10-31: pinned to 26.x (ASC requires Xcode 26; latest-stable must not drift to 27 on its own)
+
+      - name: Set up Ruby (fastlane)
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+          bundler-cache: true
+          working-directory: ios
+
+      - name: Fastlane beta_unity (match + gym + TestFlight)
+        working-directory: ios
+        timeout-minutes: 60
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          ITC_TEAM_ID: ${{ secrets.ITC_TEAM_ID }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_CONTENT: ${{ secrets.ASC_KEY_CONTENT }}
+          MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
+          MATCH_GIT_BASIC_AUTH: ${{ secrets.MATCH_GIT_BASIC_AUTH }}
+          MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+          MATCH_READONLY: "true"
+          FASTLANE_HIDE_CHANGELOG: "1"
+          FASTLANE_XCODEBUILD_SETTINGS_TIMEOUT: "180"
+          FASTLANE_XCODEBUILD_SETTINGS_RETRIES: "5"
+        run: bundle exec fastlane beta_unity
+
+      - name: Upload IPA artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: keplerdrift-ios-ipa
+          path: ios/build/*.ipa
+          if-no-files-found: ignore
+          retention-days: 1   # Birdie 2026-10-31: if the repo is public, a signed unreleased IPA is downloadable by anyone

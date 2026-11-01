@@ -1,0 +1,120 @@
+name: Unity — screenshots
+
+# Real Unity render (adapted from Birdie Smash's screenshot workflow): the cloud has no Unity Editor and no device; this job
+# builds the same scene as a Linux player, runs it under xvfb + Mesa (software GL) with `-screenshots` (Game/ScreenshotTour.cs)
+# and writes the PNGs + report.txt to the `screenshot-results` branch under the run number. Does not touch TestFlight.
+# Trigger: push to `screens/**` branches (not main: a main push means a TestFlight build).
+
+on:
+  push:
+    branches: ['screens/**']
+    paths: ['unity/**', '.github/workflows/unity-screenshots.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: unity-screenshots-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      unity: ${{ steps.k.outputs.unity }}
+    steps:
+      - id: k
+        env:
+          U_LIC: ${{ secrets.UNITY_LICENSE }}
+          U_MAIL: ${{ secrets.UNITY_EMAIL }}
+          U_PASS: ${{ secrets.UNITY_PASSWORD }}
+        # Only presence is checked; values are never printed anywhere.
+        run: |
+          if [ -n "$U_LIC" ] && [ -n "$U_MAIL" ] && [ -n "$U_PASS" ]; then
+            echo "unity=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "unity=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Unity secrets missing (UNITY_LICENSE / UNITY_EMAIL / UNITY_PASSWORD) — screenshot tour skipped."
+          fi
+
+  screenshots:
+    needs: gate
+    if: needs.gate.outputs.unity == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL || true
+          df -h /
+
+      # Separate restore/save: the cache is saved even if the next step fails (first compile ~30 min).
+      - name: Unity Library cache (restore)
+        uses: actions/cache/restore@v4
+        with:
+          path: unity/KeplerDrift/Library
+          key: unity-library-linux-v1-${{ hashFiles('unity/KeplerDrift/Assets/**', 'unity/KeplerDrift/Packages/**') }}
+          restore-keys: |
+            unity-library-linux-v1-
+
+      - name: Unity Linux player
+        # Pinned version (same as Birdie): v6 is a new major, its inputs are untested.
+        uses: game-ci/unity-builder@v4.8.2
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        with:
+          unityVersion: 6000.0.58f2
+          targetPlatform: StandaloneLinux64
+          projectPath: unity/KeplerDrift
+          buildMethod: KeplerDrift.EditorTools.CiBuild.Linux
+          buildName: KeplerDrift
+          versioning: None
+
+      - name: Unity Library cache (save)
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: unity/KeplerDrift/Library
+          key: unity-library-linux-v1-${{ hashFiles('unity/KeplerDrift/Assets/**', 'unity/KeplerDrift/Packages/**') }}
+
+      - name: Screenshot tour under xvfb
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq xvfb libgl1-mesa-dri libglu1-mesa > /dev/null
+          ls -la build/StandaloneLinux64 || true
+          EXE=$(ls build/StandaloneLinux64/KeplerDrift* | grep -v '_Data' | head -1)
+          sudo chmod -R a+rwX build
+          mkdir -p "$RUNNER_TEMP/screenshots"
+          export LIBGL_ALWAYS_SOFTWARE=1
+          # 390x845 logical iPhone size; the xvfb screen opens larger than that.
+          timeout 1200 xvfb-run -a -s "-screen 0 800x1300x24" "$EXE" -screen-width 390 -screen-height 845 -screen-fullscreen 0 \
+            -force-glcore -logFile "$RUNNER_TEMP/screenshots/player.log" -screenshots "$RUNNER_TEMP/screenshots" || echo "player exit code $?"
+          ls -la "$RUNNER_TEMP/screenshots"
+          grep -E "ScreenshotTour|Exception|Error" "$RUNNER_TEMP/screenshots/player.log" | grep -v ALSA | tail -60 || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: unity-screenshots
+          path: ${{ runner.temp }}/screenshots
+          retention-days: 5
+
+      # Results go to a separate branch (the cloud session cannot download artifacts but can fetch a branch):
+      # screenshot-results/r<run>/. If the branch does not exist it is created as an orphan on the first run.
+      - name: Write to screenshot-results branch
+        if: always()
+        run: |
+          git config user.name "keplerdrift-screenshots"; git config user.email "screenshots@users.noreply.github.com"
+          W="$RUNNER_TEMP/results"
+          if git fetch -q origin screenshot-results; then
+            git worktree add -B screenshot-results "$W" origin/screenshot-results
+          else
+            git worktree add --detach "$W" && (cd "$W" && git checkout -q --orphan screenshot-results && git rm -rqf . )
+          fi
+          D="r${{ github.run_number }}"; mkdir -p "$W/$D"; cp -r "$RUNNER_TEMP/screenshots/." "$W/$D/" || true
+          echo "${{ github.sha }}" > "$W/$D/sha.txt"
+          cd "$W" && git add "$D" && git commit -qm "screenshots $D (${{ github.sha }})" && git push -q origin screenshot-results

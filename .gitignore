@@ -1,0 +1,38 @@
+# Unity (unity/KeplerDrift/.gitignore carries the same list; it is kept at the root too so the cache cannot leak into the repo if the project moves)
+unity/**/Library/
+unity/**/Temp/
+unity/**/Obj/
+unity/**/Build/
+unity/**/Builds/
+unity/**/Logs/
+unity/**/UserSettings/
+unity/**/MemoryCaptures/
+*.csproj
+*.sln
+.vs/
+.idea/
+build/
+# fastlane outputs
+ios/fastlane/report.xml
+ios/fastlane/README.md
+ios/fastlane/test_output/
+ios/build/
+*.ipa
+*.dSYM.zip
+# Secrets
+.env
+tmp/
+# Claude: local settings/hooks are machine-specific; skills go into the repo so the cloud session sees them (sandik decision 2026-10-08)
+.claude/*
+!.claude/skills/
+__pycache__/
+# Signing and license files: must never be committed by accident (Birdie 2026-10-31 store audit D1)
+*.p12
+*.p8
+*.cer
+*.mobileprovision
+*.provisionprofile
+*.keystore
+*.jks
+*.ulf
+*.alf

@@ -1,0 +1,22 @@
+=== UNITY ===
+First test build of Kepler Drift. There is one mission: MISSION 3 · MARS.
+
+How to play:
+- Hold the screen: the probe locks onto the nearest planet's ring and orbits it.
+- Lift your finger: the probe leaves the ring on a tangent. Release while facing the next target and you get "PERFECT"; perfects in a row build a chain.
+- Tap briefly while flying: burns fuel, the probe speeds up. The tank holds 5 fuel.
+- Taking extra laps around a planet slows the probe down (BRAKE). You can only dock at Mars Base when slow (when SPEED turns white).
+- Venus is hot: linger on it and HEAT fills up and a shield burns out.
+
+How to test:
+1. Open the app: the probe should be orbiting Earth, with SPEED, FUEL, SAMPLE at the bottom.
+2. Release while facing the Moon, then hold again when you reach the Moon's ring: you should lock onto the Moon.
+3. Tap briefly once while flying: FUEL should drop by one and the probe should speed up.
+4. Stay on Venus for a long time: the HEAT bar should fill, the probe should break away by itself and one shield should go.
+5. Take a few laps at Mars and when SPEED drops below 2.6 release toward the base: "SOFT LANDING" and the stars should appear.
+6. Fall off the screen: "SIGNAL LOST" should appear; "Retry" should start over.
+
+Not in this build yet: visual polish (star field, flame, particles), vibration, menu and other missions. Sounds are drafts.
+If something gets stuck, write which phone it was and what you did.
+
+Türkçe: Kepler Drift'in ilk test sürümü. Telefonun dili Türkçeyse oyun yazıları Türkçe çıkar (GÖREV 3 · MARS, KUSURSUZ, HIZ, YAKIT, ISI, ÖRNEK). Basılı tut = gezegenin halkasına kilitlen; bırak = teğet fırla; uçarken kısa dokun = yakıt. Venüs'te oyalanma, Mars Üssü'ne yavaşken (HIZ beyazken) in. Bir şey takılırsa hangi telefon olduğunu ve ne yaptığını yaz.
