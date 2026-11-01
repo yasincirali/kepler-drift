@@ -7,7 +7,7 @@ Steps only the owner can do. Order matters.
    Claude's GitHub app cannot create repos (403; same as Birdie).
 2. **Claude Projects › Project settings › Resources**: add the repo. The first
    commit is ready and gets pushed as soon as the repo exists
-   (bundle: `/mnt/project-files/yorunge/repo-ilk-commit/`).
+   (done: first commit pushed 1 Nov 2026).
 
 ## 2. Tools (on your PC, once)
 3. **Unity official Claude Code plugin** (Unity Technologies, Sept 2026; ~45 skills
