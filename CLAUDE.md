@@ -57,7 +57,7 @@ expected. Verification ladder is in the `kepler-drift-unity` skill. Repo skills 
 
 ## Way of working
 - Make changes without waiting for approval; summarize in Turkish at the end. The owner reviews in batches.
-- **Push hours:** weekdays 09:00–18:30 TR no push / PR / merge. No direct push to
+- **Push hours:** weekdays 08:00–18:30 TR no push / PR / merge. No direct push to
   `main`; merging to `main` means a TestFlight build (`ios-testflight.yml`).
 - Finished, tested work merges on green and ships to TestFlight; tester notes in
   `store_listing/whats_new.txt`.
